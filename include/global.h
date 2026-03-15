@@ -92,6 +92,23 @@ void * memset(void *, int, size_t);
 int strcmp(const char *, const char*);
 #endif // IDE support
 
+// Vita: stub macros (data is zeroed for Phase 1 — real incbin/charmap TBD)
+#ifdef __vita__
+#ifndef INCBIN
+#define INCBIN(...) {0}
+#define INCBIN_U8   INCBIN
+#define INCBIN_U16  INCBIN
+#define INCBIN_U32  INCBIN
+#define INCBIN_S8   INCBIN
+#define INCBIN_S16  INCBIN
+#define INCBIN_S32  INCBIN
+#endif
+#ifndef _
+#define _(x)  {x}
+#define __(x) {x}
+#endif
+#endif // __vita__
+
 #define ARRAY_COUNT(array) (size_t)(sizeof(array) / sizeof((array)[0]))
 
 // GameFreak used a macro called "NELEMS", as evidenced by
