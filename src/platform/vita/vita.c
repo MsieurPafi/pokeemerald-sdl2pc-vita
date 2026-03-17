@@ -33,6 +33,8 @@
 unsigned int _newlib_heap_size_user = 128 * 1024 * 1024;
 
 extern void (*const gIntrTable[])(void);
+extern u16 gPlttBufferUnfaded[];
+extern u16 gPlttBufferFaded[];
 
 /* =========================================================================
  * GBA hardware state — emulated memory regions
@@ -42,6 +44,7 @@ u16 INTR_CHECK;
 void *INTR_VECTOR;
 unsigned char REG_BASE[0x400] __attribute__((aligned(4)));
 static FILE *sDbgLog = NULL;  /* forward-declared so LZ77 debug can use it */
+static int sFrameCount = 0;   /* forward-declared so LZ77 debug can log frame number */
 unsigned char PLTT[PLTT_SIZE] __attribute__((aligned(4)));
 unsigned char VRAM_[VRAM_SIZE] __attribute__((aligned(4)));
 unsigned char OAM[OAM_SIZE] __attribute__((aligned(4)));
@@ -219,10 +222,10 @@ static void lz77_decomp(const u8 *src, u8 *dest)
     int srcPos   = 4;
     int destPos  = 0;
 
-    if (sLz77Count < 20 && sDbgLog) {
+    if (sLz77Count < 30 && sDbgLog) {
         sLz77Count++;
-        /* log header: type byte, destSize */
-        char buf[64];
+        /* log header: type byte, destSize, frame count */
+        char buf[80];
         buf[0]='L';buf[1]='Z';buf[2]='7';buf[3]='7';buf[4]='#';
         /* two-digit count */
         buf[5]='0'+(sLz77Count/10); buf[6]='0'+(sLz77Count%10); buf[7]=' ';
@@ -234,7 +237,12 @@ static void lz77_decomp(const u8 *src, u8 *dest)
         buf[23]=sHex[(ds>>20)&0xF];buf[24]=sHex[(ds>>16)&0xF];
         buf[25]=sHex[(ds>>12)&0xF];buf[26]=sHex[(ds>>8)&0xF];
         buf[27]=sHex[(ds>>4)&0xF];buf[28]=sHex[ds&0xF];
-        buf[29]='\0';
+        /* append frame number */
+        buf[29]=' ';buf[30]='f';buf[31]='r';buf[32]='m';buf[33]='=';
+        unsigned int fc = (unsigned int)sFrameCount;
+        buf[34]=sHex[(fc>>12)&0xF];buf[35]=sHex[(fc>>8)&0xF];
+        buf[36]=sHex[(fc>>4)&0xF];buf[37]=sHex[fc&0xF];
+        buf[38]='\0';
         fputs(buf, sDbgLog); fputs("\n", sDbgLog); fflush(sDbgLog);
     }
 
@@ -1156,8 +1164,20 @@ static void dbg_hex(const char *label, unsigned int val)
 
 static void VDraw(void)
 {
-    static int sFrameCount = 0;
     sFrameCount++;
+
+    /* Track FadedBuf[2] change window: log every change from frame 480 onwards */
+    if (sFrameCount >= 480 && sFrameCount <= 900) {
+        static u16 sPrevFaded2 = 0xFFFF; /* sentinel */
+        u16 faded2 = gPlttBufferFaded[2];
+        u16 unfaded2 = gPlttBufferUnfaded[2];
+        if (faded2 != sPrevFaded2) {
+            dbg_hex("ChgFrm", (unsigned int)sFrameCount);
+            dbg_hex("Faded2", faded2);
+            dbg_hex("Unfad2", unfaded2);
+            sPrevFaded2 = faded2;
+        }
+    }
 
     /* Early frames: basic register/VRAM snapshot (intro sequence) */
     if (sFrameCount <= 20) {
@@ -1171,10 +1191,14 @@ static void VDraw(void)
         dbg_hex("VRAM[0]", vram0);
         dbg_hex("VRAM[3800]", vram7);
         dbg_hex("PLTT[0]", pltt0);
+        dbg_hex("PLTT[4]",   *(unsigned short *)(PLTT + 4));
+        dbg_hex("UnfadBuf[2]", gPlttBufferUnfaded[2]);
+        dbg_hex("FadedBuf[2]", gPlttBufferFaded[2]);
     }
 
-    /* Periodic title-screen snapshots at frames 120, 240, 360, 480 */
-    if (sFrameCount == 120 || sFrameCount == 240 || sFrameCount == 360 || sFrameCount == 480) {
+    /* Periodic title-screen snapshots at frames 120, 240, 360, 480, 600, 720, 840 */
+    if (sFrameCount == 120 || sFrameCount == 240 || sFrameCount == 360 || sFrameCount == 480
+     || sFrameCount == 600 || sFrameCount == 720 || sFrameCount == 840) {
         static const char sHex2[]="0123456789ABCDEF";
         char hdr[16]; int d=sFrameCount;
         hdr[0]='F';hdr[1]='r';hdr[2]='m';hdr[3]='e';hdr[4]='=';
@@ -1204,6 +1228,11 @@ static void VDraw(void)
         dbg_hex("PLTT[4]",   *(unsigned short *)(PLTT + 4));
         dbg_hex("PLTT[120]", *(unsigned short *)(PLTT + 0x120)); /* palette 9 color 0 */
         dbg_hex("PLTT[122]", *(unsigned short *)(PLTT + 0x122)); /* palette 9 color 1 */
+        /* Track palette buffer state to isolate corruption site */
+        dbg_hex("UnfadBuf[2]", gPlttBufferUnfaded[2]);
+        dbg_hex("FadedBuf[2]", gPlttBufferFaded[2]);
+        dbg_hex("UnfadBuf[0]", gPlttBufferUnfaded[0]);
+        dbg_hex("FadedBuf[0]", gPlttBufferFaded[0]);
         /* Sample 2 rendered pixels after DrawFrame to see what the renderer produces */
         /* (logged AFTER the DrawFrame call below, so we defer to end of function)    */
     }
@@ -1213,7 +1242,7 @@ static void VDraw(void)
     REG_VCOUNT = 161;
 
     /* Log rendered pixel samples at snapshot frames */
-    if (sFrameCount == 360 || sFrameCount == 480) {
+    if (sFrameCount == 360 || sFrameCount == 480 || sFrameCount == 600 || sFrameCount == 720 || sFrameCount == 840) {
         /* center pixel (120,80) and top-left (0,0) */
         dbg_hex("PX[0,0]",    sGbaFrame[0]);
         dbg_hex("PX[120,80]", sGbaFrame[80 * 240 + 120]);

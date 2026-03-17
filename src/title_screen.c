@@ -599,6 +599,9 @@ void CB2_InitTitleScreen(void)
         LZ77UnCompVram(gTitleScreenPokemonLogoGfx, (void *)(BG_CHAR_ADDR(0)));
         LZ77UnCompVram(gTitleScreenPokemonLogoTilemap, (void *)(BG_SCREEN_ADDR(9)));
         LoadPalette(gTitleScreenBgPalettes, BG_PLTT_ID(0), 15 * PLTT_SIZE_4BPP);
+        // gTitleScreenBgPalettes = pokemon_logo.gbapal (16 pal, 256 u16) + rayquaza_and_clouds.gbapal (1 pal, 16 u16).
+        // The 15-palette load above misses entry [256+], so load rayquaza_and_clouds into BG palette 15 explicitly.
+        LoadPalette(&gTitleScreenBgPalettes[256], BG_PLTT_ID(15), PLTT_SIZE_4BPP);
         // bg3
         LZ77UnCompVram(sTitleScreenRayquazaGfx, (void *)(BG_CHAR_ADDR(2)));
         LZ77UnCompVram(sTitleScreenRayquazaTilemap, (void *)(BG_SCREEN_ADDR(26)));
